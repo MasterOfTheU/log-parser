@@ -3,7 +3,7 @@ package parsing;
 public class Main {
 
     public static void main(String[] args) {
-        //comment this to avoid second write to db
+        //Comment line below to avoid second write of same logs to db
         //createLogs();
         createMongoQueries();
         createMapReduceMongoQueries();
@@ -36,6 +36,9 @@ public class Main {
         DBConnector dbConnector = new DBConnector();
         dbConnector.connectToDB();
         dbConnector.getDescendingURLListByTimeSpent();
+        dbConnector.getDescendingURLListByVisitsNumber();
+        dbConnector.getDescendingURLListInTimePeriod("11:00", "18:00");
+        dbConnector.getDescendingIPLListByVisitsAndTime();
     }
 
 }
