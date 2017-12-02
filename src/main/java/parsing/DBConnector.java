@@ -8,7 +8,7 @@ import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
 import java.util.ArrayList;
-import java.util.Stack;
+import java.util.Iterator;
 
 import static com.mongodb.client.model.Projections.*;
 import static com.mongodb.client.model.Sorts.*;
@@ -27,6 +27,7 @@ public class DBConnector {
         mongoClient = new MongoClient("localhost", 27017);
         database = mongoClient.getDatabase("userlogs");
         collection = database.getCollection("logs");
+        System.out.println("Successfully connected to database.");
     }
 
     /**
@@ -35,19 +36,30 @@ public class DBConnector {
     public void insertDocumentsToDB(){
         ArrayList<Document> listJSONdocs = createJSONlistFromSCV("logs.csv");
         collection.insertMany(listJSONdocs);
+        System.out.println("Documents were inserted to Database.");
         mongoClient.close();
     }
 
     //region Mongo Selection Tools
+
     /**
      * @param URLvalue URL string for query.
      * Prints ascending ordered IP list of logs where URL is URLvalue.
      */
-    public void getOrderedIPListByGivenURL(String URLvalue) {
+    public Iterator<Document> getOrderedIPListByGivenURL(String URLvalue) {
         System.out.println(Thread.currentThread().getStackTrace()[1].getMethodName());
-        collection.find(new BasicDBObject("URL", URLvalue)).projection(include("IP", "URL", "timeStamp"))
+
+        MongoCursor<Document> mongoCursor = collection.find(new BasicDBObject("URL", URLvalue)).projection(include("IP", "URL", "timeStamp"))
                 .projection(fields(include("IP", "timeSpent"), excludeId()))
-                .sort(ascending("IP")).forEach((Block<Document>) System.out::println);
+                .sort(ascending("IP")).iterator();
+
+        while (mongoCursor.hasNext()) {
+            System.out.println(mongoCursor.next().toJson()
+                    .replace("{ \"$numberLong\" : \"", "")
+                    .replace("\" } }", " }"));
+        }
+
+        return mongoCursor;
     }
 
     /**
@@ -55,33 +67,50 @@ public class DBConnector {
      * @param endTime End time stamp for query.
      * Prints ascending ordered URL list of logs in the period of time from startTime to endTime sorted by spent time.
      */
-    public void getOrderedURLListByTimeStamp(String startTime, String endTime) {
+    public Iterator<Document> getOrderedURLListByTimeStamp(String startTime, String endTime) {
         System.out.println(Thread.currentThread().getStackTrace()[1].getMethodName());
-        collection.find(new BasicDBObject("timeStamp", new BasicDBObject("$gte", startTime).append("$lte", endTime)))
+        MongoCursor<Document> mongoCursor = collection.find(new BasicDBObject("timeStamp", new BasicDBObject("$gte", startTime).append("$lte", endTime)))
                 .projection(fields(include("IP", "timeSpent"), excludeId()))
-                .sort(ascending("timeSpent")).forEach((Block<Document>) System.out::println);
+                .sort(ascending("timeSpent")).iterator();
+
+        while (mongoCursor.hasNext()) {
+            System.out.println(mongoCursor.next().toJson()
+                    .replace("{ \"$numberLong\" : \"", "")
+                    .replace("\" } }", " }"));
+        }
+
+        return mongoCursor;
     }
 
     /**
      * @param IP string for query.
      * Prints ascending ordered URL list of logs with given IP address sorted by spent time.
      */
-    public void getOrderedURLListByGivenIP(String IP) {
+    public Iterator<Document> getOrderedURLListByGivenIP(String IP) {
         System.out.println(Thread.currentThread().getStackTrace()[1].getMethodName());
-        collection.find(new BasicDBObject("IP", IP))
+        MongoCursor<Document> mongoCursor = collection.find(new BasicDBObject("IP", IP))
                 .projection(fields(include("IP", "URL", "timeSpent"), excludeId()))
-                .sort(ascending("timeSpent")).forEach((Block<Document>) System.out::println);
-        mongoClient.close();
+                .sort(ascending("timeSpent")).iterator();
+        String docJson;
+        while (mongoCursor.hasNext()) {
+            docJson = mongoCursor.next().toJson()
+                    .replace("{ \"$numberLong\" : \"", "")
+                    .replace("\" } }", " }");
+            System.out.println(docJson);
+        }
+
+        return mongoCursor;
     }
+
     //endregion
 
-
+    //region Queries with usage of Map Reduce paradigm
     /**
      * Prints descending ordered URL list of logs with total duration of URL visit.
      * The result of mapReduce method is written into new collection to avoid changes in global original collection.
      * Fields of new collection are replaced with proper values for printing them to concole.
      */
-    public void getDescendingURLListByTimeSpent() {
+    public MongoCursor<Document> getDescendingURLListByTimeSpent() {
         System.out.println(Thread.currentThread().getStackTrace()[1].getMethodName());
         String map = "function() { emit(this.URL, this.timeSpent);}";
         String reduce = "function(key, values) { return Array.sum(values); }";
@@ -99,12 +128,14 @@ public class DBConnector {
                     .replace("\" } }", " }");
             System.out.println(docJson);
         }
+
+        return mongoCursor;
     }
 
     /**
      * Prints descending ordered URL list of logs with total number of url visits.
      */
-    public void getDescendingURLListByVisitsNumber() {
+    public MongoCursor<Document> getDescendingURLListByVisitsNumber() {
         System.out.println(Thread.currentThread().getStackTrace()[1].getMethodName());
         String map = "function() { emit(this.URL, 1);}";
         String reduce = "function(key, values) { return Array.sum(values); }";
@@ -123,14 +154,16 @@ public class DBConnector {
                     .replace("\" } }", " }");
             System.out.println(docJson);
         }
+
+        return mongoCursor;
     }
 
     /**
      * @param startTime Start time stamp for query.
      * @param endTime End time stamp for query.
-     *          Prints descending ordered URL list of logs within specified period of time.
+     *                Prints sorted list of logs in specified time period.
      */
-    public void getDescendingURLListInTimePeriod(String startTime, String endTime){
+    public MongoCursor<Document> getDescendingURLListInTimePeriod(String startTime, String endTime){
         System.out.println(Thread.currentThread().getStackTrace()[1].getMethodName());
         String map = "function() { "
                 + " var timeStamp = this.timeStamp; "
@@ -156,12 +189,14 @@ public class DBConnector {
                     .replace("\" } }", " }");
             System.out.println(docJson);
         }
+
+        return mongoCursor;
     }
 
     /**
      *  Prints descending ordered IP list of logs sorted by spent time.
      */
-    public void getDescendingIPLListByVisitsAndTime(){
+    public MongoCursor<Document> getDescendingIPLListByVisitsAndTime(){
         System.out.println(Thread.currentThread().getStackTrace()[1].getMethodName());
         String map = "function() { emit( this.IP, this.timeSpent); }";
         String reduce = "function(key, values) { return {count:values.length, timeSpent:Array.sum(values)}; }";
@@ -182,7 +217,10 @@ public class DBConnector {
                     .replace("\" } }", " }");
             System.out.println(docJson);
         }
+
         mongoClient.close();
+        return mongoCursor;
     }
+    //endregion
 
 }
